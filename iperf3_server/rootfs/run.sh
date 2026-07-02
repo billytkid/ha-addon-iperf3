@@ -27,7 +27,7 @@ trim_log() {
 trim_log &
 
 log_debug() {
-    [ "${VERBOSE}" = "true" ] && bashio::log.info "[debug] $1"
+    [ "${VERBOSE}" = "true" ] && bashio::log.info "[debug] $1" || true
 }
 
 MQTT_OK=false
