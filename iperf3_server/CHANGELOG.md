@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0
+- Added ingress web UI (sidebar panel): live RX/TX status, form to run TX tests, works without MQTT
+- Added `sensor.iperf3_rx_status` and `sensor.iperf3_rx_last_test`
+
+## 1.6.0
+- Renamed add-on from "iperf3 Server" to "iperf3" (it's both server and client) — slug/entities unchanged, no migration needed
+
 ## 1.5.0
 - Renamed all entities/topics to RX (server/receive) and TX (client/transmit) prefixes for clarity
 - BREAKING: unique_ids changed — old entities become unavailable, remove manually

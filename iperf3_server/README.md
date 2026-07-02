@@ -1,27 +1,34 @@
-# iperf3 Server Add-on
+# iperf3 Add-on
 
-Runs an iperf3 server and also lets you trigger outgoing iperf3 tests, both exposed as HA entities via MQTT.
+Runs an iperf3 server (RX) and lets you trigger outgoing iperf3 tests (TX). Exposes both via MQTT entities and a built-in web UI (Home Assistant ingress panel — shows up in the sidebar, like ESPHome's dashboard).
 
 ## Requirements
 
-- The official Mosquitto broker add-on (or any MQTT broker set up as HA's MQTT integration), since this add-on auto-discovers broker credentials via `services: mqtt:want`.
+- MQTT entities require the official Mosquitto broker add-on (or any MQTT broker set up as HA's MQTT integration) — auto-discovered via `services: mqtt:want`. The web UI works even without MQTT.
 
 ## Install (local add-on)
 
 1. Copy the `iperf3_server` folder into `/addons/` on your HA host (Samba add-on or SSH).
 2. Settings → Add-ons → Add-on Store → refresh (⋮ menu) → find it under "Local add-ons".
 3. Install, then Start.
+4. Open it from the sidebar (panel icon) for the live web UI, or use the entities below.
 
 ## Options
 
 - `port` (default `5201`): iperf3 listen port. Update the `ports:` mapping in config.yaml too if changed.
 - `verbose_logging` (default `false`): logs the exact iperf3 command run and raw JSON result for TX tests.
 
-## Entities
+## Web UI
+
+Live RX/TX status (auto-refreshes every 2s) plus a form to run a TX test (target IP, streams, protocol, duration, UDP bandwidth, reverse). Works independently of MQTT.
+
+## Entities (requires MQTT)
 
 **RX (incoming tests — this add-on as the server):**
 - `sensor.iperf3_rx_sending_host` — client IP/hostname of the last incoming test
 - `sensor.iperf3_rx_throughput_mbps` — throughput in Mbit/s of the last incoming test
+- `sensor.iperf3_rx_status` — waiting / OK
+- `sensor.iperf3_rx_last_test` — timestamp of the last completed RX test
 
 **TX (outgoing tests — this add-on as the client):**
 - `text.iperf3_tx_target_ip` — IP to test against
@@ -34,13 +41,11 @@ Runs an iperf3 server and also lets you trigger outgoing iperf3 tests, both expo
 - `sensor.iperf3_tx_tested_ip` — result: IP tested
 - `sensor.iperf3_tx_total_transferred` — result: total data (MB)
 - `sensor.iperf3_tx_bitrate` — result: throughput (Mbit/s)
-- `sensor.iperf3_tx_status` — OK / Failed / Invalid target IP
+- `sensor.iperf3_tx_status` — Running / OK / Failed / Invalid target IP
 - `sensor.iperf3_tx_last_test` — timestamp of the last TX test
 
 ## Usage
 
 RX: `iperf3 -c <home-assistant-ip> -p 5201`
 
-TX: set `text.iperf3_tx_target_ip` etc. in HA, then press `button.iperf3_tx_run_test`.
-
-Note: entity unique_ids changed in 1.5.0 (RX/TX naming). Old entities from earlier versions will show as unavailable — remove them manually under Settings → Devices & Services → Entities.
+TX: use the web UI, or set the `text`/`number`/`select` entities in HA then press `button.iperf3_tx_run_test`.

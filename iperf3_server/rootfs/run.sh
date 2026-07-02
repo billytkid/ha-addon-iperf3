@@ -3,6 +3,10 @@ set -e
 
 PORT=$(bashio::config 'port')
 VERBOSE=$(bashio::config 'verbose_logging')
+STATE_FILE="/data/state.json"
+CMD_FILE="/data/tx_command.json"
+
+[ -f "${STATE_FILE}" ] || echo '{}' > "${STATE_FILE}"
 
 log_debug() {
     [ "${VERBOSE}" = "true" ] && bashio::log.info "[debug] $1"
@@ -23,15 +27,29 @@ fi
 DEVICE_ID="iperf3_server"
 DISC_PREFIX="homeassistant"
 
+# publish() sends to MQTT (if available) AND mirrors state topics to a local
+# JSON file that the ingress web UI reads, so the UI works even without MQTT.
 publish() {
+    TOPIC="$1"
+    VALUE="$2"
+
     if [ "${MQTT_OK}" = true ]; then
-        mosquitto_pub "${MQ_ARGS[@]}" -r -t "$1" -m "$2" || bashio::log.warning "MQTT publish to $1 failed"
+        mosquitto_pub "${MQ_ARGS[@]}" -r -t "${TOPIC}" -m "${VALUE}" || bashio::log.warning "MQTT publish to ${TOPIC} failed"
     fi
+
+    case "${TOPIC}" in
+        ${DISC_PREFIX}/*) ;; # skip discovery config payloads
+        *)
+            KEY=$(echo "${TOPIC}" | sed 's#^iperf3/##; s#/#_#g')
+            jq --arg k "${KEY}" --arg v "${VALUE}" '.[$k]=$v' "${STATE_FILE}" > "${STATE_FILE}.tmp" 2>/dev/null \
+                && mv "${STATE_FILE}.tmp" "${STATE_FILE}"
+            ;;
+    esac
 }
 
 if [ "${MQTT_OK}" = true ]; then
     bashio::log.info "Publishing MQTT discovery for iperf3 sensors"
-    DEVICE_JSON='{"identifiers":["iperf3_server"],"name":"iperf3 Server","model":"iperf3","manufacturer":"ESnet"}'
+    DEVICE_JSON='{"identifiers":["iperf3_server"],"name":"iperf3","model":"iperf3","manufacturer":"ESnet"}'
 
     # --- RX (server / receiving tests) ---
     publish "${DISC_PREFIX}/sensor/${DEVICE_ID}/rx_sending_host/config" \
@@ -39,6 +57,12 @@ if [ "${MQTT_OK}" = true ]; then
 
     publish "${DISC_PREFIX}/sensor/${DEVICE_ID}/rx_throughput_mbps/config" \
     "{\"name\":\"iperf3 RX Throughput\",\"unique_id\":\"iperf3_rx_throughput_mbps\",\"state_topic\":\"iperf3/rx/throughput_mbps\",\"unit_of_measurement\":\"Mbit/s\",\"device_class\":\"data_rate\",\"state_class\":\"measurement\",\"icon\":\"mdi:speedometer\",\"device\":${DEVICE_JSON}}"
+
+    publish "${DISC_PREFIX}/sensor/${DEVICE_ID}/rx_status/config" \
+    "{\"name\":\"iperf3 RX Status\",\"unique_id\":\"iperf3_rx_status\",\"state_topic\":\"iperf3/rx/status\",\"icon\":\"mdi:access-point\",\"device\":${DEVICE_JSON}}"
+
+    publish "${DISC_PREFIX}/sensor/${DEVICE_ID}/rx_last_test/config" \
+    "{\"name\":\"iperf3 RX Last Test Time\",\"unique_id\":\"iperf3_rx_last_test\",\"state_topic\":\"iperf3/rx/last_test\",\"device_class\":\"timestamp\",\"icon\":\"mdi:clock-outline\",\"device\":${DEVICE_JSON}}"
 
     # --- TX (client / outgoing tests) ---
     publish "${DISC_PREFIX}/text/${DEVICE_ID}/tx_target_ip/config" \
@@ -86,11 +110,15 @@ if [ "${MQTT_OK}" = true ]; then
     publish "iperf3/tx/udp_bandwidth/state" "100"
 fi
 
+bashio::log.info "Starting ingress web UI"
+python3 /server.py &
+
 bashio::log.info "Starting iperf3 RX (server) loop on port ${PORT}"
 
 rx_loop() {
     while true; do
         bashio::log.info "RX: waiting for iperf3 client on port ${PORT}"
+        publish "iperf3/rx/status" "waiting"
         RESULT=$(iperf3 --server --port "${PORT}" --one-off --json 2>/dev/null) || {
             bashio::log.warning "RX: iperf3 test failed or was interrupted, retrying"
             sleep 2
@@ -105,6 +133,8 @@ rx_loop() {
             bashio::log.info "RX: test from ${HOST}: ${MBPS} Mbps"
             publish "iperf3/rx/sending_host" "${HOST}"
             publish "iperf3/rx/throughput_mbps" "${MBPS}"
+            publish "iperf3/rx/status" "OK"
+            publish "iperf3/rx/last_test" "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
         fi
     done
 }
@@ -146,6 +176,7 @@ run_tx_test() {
 
     bashio::log.info "TX: running test to ${CUR_TARGET} (streams=${CUR_STREAMS}, proto=${CUR_PROTO}, duration=${CUR_DURATION}s, reverse=${CUR_REVERSE})"
     log_debug "TX command: iperf3 ${ARGS[*]}"
+    publish "iperf3/tx/status" "Running"
 
     CRESULT=$(iperf3 "${ARGS[@]}" 2>/dev/null) || {
         bashio::log.warning "TX: test to ${CUR_TARGET} failed"
@@ -181,7 +212,7 @@ tx_listener() {
     CUR_UDP_BW=100
 
     mosquitto_sub "${MQ_ARGS[@]}" -v -t "iperf3/tx/+/set" | while read -r TOPIC PAYLOAD; do
-        bashio::log.info "TX: received command ${TOPIC} = '${PAYLOAD}'"
+        bashio::log.info "TX: received MQTT command ${TOPIC} = '${PAYLOAD}'"
         case "${TOPIC}" in
             iperf3/tx/target_ip/set)
                 CUR_TARGET="${PAYLOAD}"
@@ -214,8 +245,32 @@ tx_listener() {
     done
 }
 
+# Watches for test requests submitted from the ingress web UI (writes to
+# CMD_FILE). Independent of MQTT so the web UI works even without a broker.
+web_command_watcher() {
+    LAST_TRIGGER=""
+    while true; do
+        if [ -f "${CMD_FILE}" ]; then
+            TRIGGER=$(jq -r '.trigger // empty' "${CMD_FILE}" 2>/dev/null)
+            if [ -n "${TRIGGER}" ] && [ "${TRIGGER}" != "${LAST_TRIGGER}" ]; then
+                LAST_TRIGGER="${TRIGGER}"
+                CUR_TARGET=$(jq -r '.target_ip // empty' "${CMD_FILE}")
+                CUR_STREAMS=$(jq -r '.streams // 1' "${CMD_FILE}")
+                CUR_PROTO=$(jq -r '.protocol // "TCP"' "${CMD_FILE}")
+                CUR_DURATION=$(jq -r '.duration // 10' "${CMD_FILE}")
+                CUR_REVERSE=$(jq -r '.reverse // "OFF"' "${CMD_FILE}")
+                CUR_UDP_BW=$(jq -r '.udp_bandwidth // 100' "${CMD_FILE}")
+                bashio::log.info "TX: received web UI command target=${CUR_TARGET}"
+                run_tx_test
+            fi
+        fi
+        sleep 1
+    done
+}
+
 if [ "${MQTT_OK}" = true ]; then
     tx_listener &
 fi
+web_command_watcher &
 
 rx_loop
