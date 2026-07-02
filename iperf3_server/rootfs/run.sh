@@ -5,8 +5,24 @@ PORT=$(bashio::config 'port')
 VERBOSE=$(bashio::config 'verbose_logging')
 STATE_FILE="/data/state.json"
 CMD_FILE="/data/tx_command.json"
+LOG_FILE="/data/iperf3.log"
 
 [ -f "${STATE_FILE}" ] || echo '{}' > "${STATE_FILE}"
+: > "${LOG_FILE}"
+
+# Line-buffer and mirror all output to LOG_FILE so the ingress UI's log
+# viewer updates promptly (HA's own Log tab can lag several seconds).
+exec > >(stdbuf -oL tee -a "${LOG_FILE}") 2>&1
+
+trim_log() {
+    while true; do
+        sleep 30
+        if [ -f "${LOG_FILE}" ]; then
+            tail -n 500 "${LOG_FILE}" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "${LOG_FILE}"
+        fi
+    done
+}
+trim_log &
 
 log_debug() {
     [ "${VERBOSE}" = "true" ] && bashio::log.info "[debug] $1"

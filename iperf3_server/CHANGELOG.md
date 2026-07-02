@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0
+- Added live log viewer + Clear Log button to the ingress web UI
+- All output now line-buffered and mirrored to a file for prompt display (works around HA's Log tab lag)
+
+## 2.0.1
+- Fixed ingress web UI silently failing to fetch state (relative-path resolution under HA's ingress proxy); errors now shown in the UI
+
 ## 2.0.0
 - Added ingress web UI (sidebar panel): live RX/TX status, form to run TX tests, works without MQTT
 - Added `sensor.iperf3_rx_status` and `sensor.iperf3_rx_last_test`

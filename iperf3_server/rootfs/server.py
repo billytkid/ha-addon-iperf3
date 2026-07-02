@@ -5,9 +5,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 STATE_FILE = "/data/state.json"
 CMD_FILE = "/data/tx_command.json"
+LOG_FILE = "/data/iperf3.log"
 
 PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>iperf3</title>
+<base href="./">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:1.2rem;background:#111;color:#eee}
@@ -25,6 +27,11 @@ PAGE = """<!doctype html>
   #msg{color:#4caf50;font-size:.85rem;min-height:1.2em}
   .chk{display:flex;align-items:center;gap:.5rem;margin-top:.8rem}
   .chk input{width:auto}
+  #log{background:#1c1c1c;border:1px solid #333;border-radius:4px;padding:.6rem;
+    font-family:ui-monospace,Consolas,monospace;font-size:.78rem;white-space:pre-wrap;
+    max-height:280px;overflow-y:auto;margin-top:.4rem}
+  .btn-secondary{background:#444}
+  .btn-secondary:hover{background:#555}
 </style></head>
 <body>
 <h2>RX &mdash; incoming tests</h2>
@@ -54,11 +61,15 @@ PAGE = """<!doctype html>
 <button onclick="runTest()">Run Test</button>
 <p id="msg"></p>
 
+<h2>Log <button class="btn-secondary" onclick="clearLog()" style="margin-left:.8rem;padding:.25rem .7rem;font-size:.8rem">Clear Log</button></h2>
+<div id="log"></div>
+
 <script>
 function row(k,v){return `<tr><td>${k}</td><td>${v || '-'}</td></tr>`}
 async function refresh(){
   try{
     const r = await fetch('state');
+    if(!r.ok){ document.getElementById('msg').textContent = 'state fetch failed: HTTP ' + r.status; return; }
     const s = await r.json();
     document.getElementById('rx').innerHTML =
       row('Status', s.rx_status) +
@@ -71,7 +82,9 @@ async function refresh(){
       row('Total transferred (MB)', s.tx_total_transferred) +
       row('Bitrate (Mbit/s)', s.tx_bitrate) +
       row('Last test', s.tx_last_test);
-  }catch(e){}
+  }catch(e){
+    document.getElementById('msg').textContent = 'state fetch error: ' + e;
+  }
 }
 async function runTest(){
   const body = {
@@ -87,8 +100,24 @@ async function runTest(){
   await fetch('run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   setTimeout(refresh, 500);
 }
+async function refreshLog(){
+  try{
+    const r = await fetch('log');
+    const t = await r.text();
+    const el = document.getElementById('log');
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+    el.textContent = t;
+    if(atBottom) el.scrollTop = el.scrollHeight;
+  }catch(e){}
+}
+async function clearLog(){
+  await fetch('clear-log', {method:'POST'});
+  refreshLog();
+}
 setInterval(refresh, 2000);
+setInterval(refreshLog, 2000);
 refresh();
+refreshLog();
 </script>
 </body></html>"""
 
@@ -110,6 +139,13 @@ class Handler(BaseHTTPRequestHandler):
             except FileNotFoundError:
                 data = "{}"
             self._send(200, data)
+        elif self.path.startswith("/log"):
+            try:
+                with open(LOG_FILE) as f:
+                    data = f.read()
+            except FileNotFoundError:
+                data = ""
+            self._send(200, data, "text/plain; charset=utf-8")
         else:
             self._send(200, PAGE, "text/html; charset=utf-8")
 
@@ -123,6 +159,12 @@ class Handler(BaseHTTPRequestHandler):
             body["trigger"] = str(uuid.uuid4())
             with open(CMD_FILE, "w") as f:
                 json.dump(body, f)
+            self._send(200, json.dumps({"ok": True}))
+        elif self.path.startswith("/clear-log"):
+            try:
+                open(LOG_FILE, "w").close()
+            except Exception:
+                pass
             self._send(200, json.dumps({"ok": True}))
         else:
             self._send(404, json.dumps({"error": "not found"}))
