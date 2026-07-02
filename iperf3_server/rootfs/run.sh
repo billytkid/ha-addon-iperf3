@@ -164,9 +164,17 @@ is_valid_target() {
 }
 
 run_tx_test() {
+    if [ -f "${TX_LOCK}" ]; then
+        bashio::log.warning "TX: test already in progress, ignoring new request"
+        publish "iperf3/tx/status" "Busy - test already running"
+        return
+    fi
+    touch "${TX_LOCK}"
+
     if ! is_valid_target "${CUR_TARGET}"; then
         bashio::log.warning "TX: test requested but Target IP '${CUR_TARGET}' is empty or invalid"
         publish "iperf3/tx/status" "Invalid target IP"
+        rm -f "${TX_LOCK}"
         return
     fi
 
@@ -186,18 +194,27 @@ run_tx_test() {
         ''|*[!0-9]*) CUR_UDP_BW=100 ;;
     esac
 
-    ARGS=(-c "${CUR_TARGET}" -P "${CUR_STREAMS}" -t "${CUR_DURATION}" --json)
+    ARGS=(-c "${CUR_TARGET}" -P "${CUR_STREAMS}" -t "${CUR_DURATION}" --connect-timeout 5000 --json)
     [ "${CUR_PROTO}" = "UDP" ] && ARGS+=(-u -b "${CUR_UDP_BW}M")
     [ "${CUR_REVERSE}" = "ON" ] && ARGS+=(-R)
 
+    HARD_TIMEOUT=$((CUR_DURATION + 15))
+
     bashio::log.info "TX: running test to ${CUR_TARGET} (streams=${CUR_STREAMS}, proto=${CUR_PROTO}, duration=${CUR_DURATION}s, reverse=${CUR_REVERSE})"
-    log_debug "TX command: iperf3 ${ARGS[*]}"
+    log_debug "TX command: timeout ${HARD_TIMEOUT}s iperf3 ${ARGS[*]}"
     publish "iperf3/tx/status" "Running"
 
-    CRESULT=$(iperf3 "${ARGS[@]}" 2>/dev/null) || {
-        bashio::log.warning "TX: test to ${CUR_TARGET} failed"
-        publish "iperf3/tx/status" "Failed"
+    CRESULT=$(timeout "${HARD_TIMEOUT}s" iperf3 "${ARGS[@]}" 2>/dev/null) || {
+        RC=$?
+        if [ "${RC}" -eq 124 ]; then
+            bashio::log.warning "TX: test to ${CUR_TARGET} timed out after ${HARD_TIMEOUT}s (no response - check target/firewall)"
+            publish "iperf3/tx/status" "Timed out"
+        else
+            bashio::log.warning "TX: test to ${CUR_TARGET} failed"
+            publish "iperf3/tx/status" "Failed"
+        fi
         publish "iperf3/tx/last_test" "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+        rm -f "${TX_LOCK}"
         return
     }
 
@@ -217,6 +234,7 @@ run_tx_test() {
     publish "iperf3/tx/bitrate" "${MBPS}"
     publish "iperf3/tx/status" "OK"
     publish "iperf3/tx/last_test" "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+    rm -f "${TX_LOCK}"
 }
 
 tx_listener() {

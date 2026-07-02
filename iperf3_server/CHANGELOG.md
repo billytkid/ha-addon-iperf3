@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.2
+- Fixed root cause of the hangs: `stdbuf` isn't in Alpine's base image, so the exec/tee redirection line was silently failing and breaking the script. Added `coreutils` package.
+
+## 2.1.1
+- Fixed GUI log not matching add-on log: added no-cache headers + cache-busting on the log fetch
+- Note: GUI log starts from container start and won't include the s6-overlay boot lines HA's own Log tab shows
+
 ## 2.1.0
 - Added live log viewer + Clear Log button to the ingress web UI
 - All output now line-buffered and mirrored to a file for prompt display (works around HA's Log tab lag)

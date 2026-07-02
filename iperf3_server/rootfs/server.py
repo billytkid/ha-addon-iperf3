@@ -102,7 +102,7 @@ async function runTest(){
 }
 async function refreshLog(){
   try{
-    const r = await fetch('log');
+    const r = await fetch('log?t=' + Date.now());
     const t = await r.text();
     const el = document.getElementById('log');
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
@@ -128,6 +128,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.end_headers()
         self.wfile.write(data)
 
