@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+- Renamed all entities/topics to RX (server/receive) and TX (client/transmit) prefixes for clarity
+- BREAKING: unique_ids changed — old entities become unavailable, remove manually
+
+## 1.4.0
+- Added `verbose_logging` config option (logs exact iperf3 command + raw JSON result)
+- Every received MQTT command now logged (topic + payload) to catch stale-value/ordering issues
+
 ## 1.3.0
 - Added client test controls: duration, reverse (download) mode, UDP bandwidth
 - Added `sensor.iperf3_client_status` and `sensor.iperf3_client_last_test`
