@@ -1,5 +1,5 @@
 name: "iperf3"
-version: "2.2.2"
+version: "2.2.3"
 slug: "iperf3_server"
 description: "Runs iperf3 as both server (RX) and client (TX), with entities via MQTT and a web UI"
 url: "https://github.com/esnet/iperf"

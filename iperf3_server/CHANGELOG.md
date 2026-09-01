@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.3
+- Fixed silent crash-loop: removed blanket `set -e` so a transient MQTT publish
+  or state-file write no longer kills the whole add-on
+- State file (`/data/state.json`) is now reset when missing **or corrupt** (a
+  truncated write from a full disk previously caused every boot to crash-loop)
+
 ## 2.2.1
 - Fixed `TX_LOCK: unbound variable` crash — variable was used but never defined
 - Stale lock file now cleared on add-on start

@@ -1,5 +1,7 @@
 #!/usr/bin/with-contenv bashio
-set -e
+# No 'set -e': a transient MQTT publish or state-file write must not kill the
+# whole add-on. That turned any hiccup (full disk, corrupt state.json, MQTT not
+# ready) into a silent crash-loop. Errors are handled locally where they matter.
 
 PORT=$(bashio::config 'port')
 VERBOSE=$(bashio::config 'verbose_logging')
@@ -8,7 +10,10 @@ CMD_FILE="/data/tx_command.json"
 LOG_FILE="/data/iperf3.log"
 TX_LOCK="/data/tx.lock"
 
-[ -f "${STATE_FILE}" ] || echo '{}' > "${STATE_FILE}"
+# Reset the state file if it is missing OR not valid JSON. A truncated write
+# (e.g. from a full disk) would otherwise make every jq call fail and, with the
+# old 'set -e', crash-loop the add-on on every boot.
+jq -e . "${STATE_FILE}" >/dev/null 2>&1 || echo '{}' > "${STATE_FILE}"
 : > "${LOG_FILE}"
 rm -f "${TX_LOCK}"
 
