@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.4
+- Fixed a race between the RX, TX and web-UI loops writing the state file.
+  They all wrote to a single shared `/data/state.json.tmp`, so they collided
+  and one `mv` would fail with `mv: cannot stat '/data/state.json.tmp'` in the
+  log. Each write now uses its own `mktemp` file, so state updates are atomic
+  and the spurious error is gone. Non-fatal noise only — no behaviour change
+  beyond the cleaner log and no more occasionally-dropped state writes.
+
 ## 2.2.3
 - Fixed silent crash-loop: removed blanket `set -e` so a transient MQTT publish
   or state-file write no longer kills the whole add-on

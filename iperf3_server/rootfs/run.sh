@@ -64,8 +64,13 @@ publish() {
         ${DISC_PREFIX}/*) ;; # skip discovery config payloads
         *)
             KEY=$(echo "${TOPIC}" | sed 's#^iperf3/##; s#/#_#g')
-            jq --arg k "${KEY}" --arg v "${VALUE}" '.[$k]=$v' "${STATE_FILE}" > "${STATE_FILE}.tmp" 2>/dev/null \
-                && mv "${STATE_FILE}.tmp" "${STATE_FILE}"
+            # Unique temp file per write: the RX, TX and web-UI loops all call
+            # publish() concurrently, so a shared "${STATE_FILE}.tmp" caused them
+            # to race and one mv would fail ("cannot stat ... .tmp"). mktemp gives
+            # each writer its own file so the update is atomic and race-free.
+            TMP=$(mktemp "${STATE_FILE}.XXXXXX") \
+                && jq --arg k "${KEY}" --arg v "${VALUE}" '.[$k]=$v' "${STATE_FILE}" > "${TMP}" 2>/dev/null \
+                && mv "${TMP}" "${STATE_FILE}" || rm -f "${TMP}"
             ;;
     esac
 }
